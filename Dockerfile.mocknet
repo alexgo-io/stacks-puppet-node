@@ -1,0 +1,5 @@
+FROM debian:bullseye-slim
+
+COPY target/release/stacks-node /bin/stacks-node
+
+CMD ["stacks-node", "start"]

@@ -40,6 +40,8 @@ secrets*
 
 # vim
 *.swp
+# clion
+.idea/
 
 #Docker
 Docker/blockstore.ini

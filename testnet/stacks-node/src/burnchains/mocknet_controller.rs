@@ -1,5 +1,11 @@
 use std::collections::VecDeque;
+use std::io;
+use std::io::Write;
+use std::sync::{Mutex, Arc};
 use std::time::Instant;
+use async_std::stream::StreamExt;
+use async_std::task::block_on;
+use http_types::{Method, Response, StatusCode};
 
 use stacks::burnchains::bitcoin::BitcoinBlock;
 use stacks::burnchains::{
@@ -28,6 +34,8 @@ pub struct MocknetController {
     db: Option<SortitionDB>,
     chain_tip: Option<BurnchainTip>,
     queued_operations: VecDeque<BlockstackOperationType>,
+    signaled: Arc<Mutex<bool>>,
+    control_server: Option<std::thread::JoinHandle<Result<(), io::Error>>>,
 }
 
 impl MocknetController {
@@ -45,6 +53,8 @@ impl MocknetController {
             db: None,
             queued_operations: VecDeque::new(),
             chain_tip: None,
+            signaled: Arc::new(Mutex::new(false)),
+            control_server: None,
         }
     }
 
@@ -137,6 +147,45 @@ impl BurnchainController for MocknetController {
         };
         self.chain_tip = Some(genesis_state.clone());
         let block_height = genesis_state.block_snapshot.block_height;
+
+        if option_env!("STACKS_NODE_PUPPET_MODE").unwrap_or("false") == "true" {
+            info!("ENV STACKS_NODE_PUPPET_MODE is set to true, starting burnchain signal server..");
+            let signaled = Arc::clone(&self.signaled);
+            self.control_server = Some(std::thread::spawn(move || block_on(async {
+                let listener = async_std::net::TcpListener::bind(
+                    option_env!("STACKS_NODE_PUPPET_BIND").unwrap_or("0.0.0.0:20445")).await?;
+                let addr = format!("http://{}", listener.local_addr()?);
+                info!("burnchain signal server listening on {}", addr);
+
+                // For each incoming TCP connection, spawn a task and call `accept`.
+                let mut incoming = listener.incoming();
+                while let Some(stream) = incoming.next().await {
+                    let stream = stream?;
+                    async_h1::accept(stream.clone(), |req| async {
+                        let req = req;
+                        match (
+                            req.method(),
+                            req.url().path(),
+                        ) {
+                            (Method::Get, "/ping") => Ok(Response::new(StatusCode::Ok)),
+                            (Method::Post, "/kick") => {
+                                let mut signaled = signaled.lock().unwrap();
+                                *signaled = true;
+                                io::stdout().flush().unwrap();
+                                Ok(Response::new(StatusCode::Ok))
+                            }
+                            _ => {
+                                let mut rs = Response::new(StatusCode::BadRequest);
+                                rs.set_body(format!("[{}] {}", req.method(), req.url().path()));
+                                Ok(rs)
+                            }
+                        }
+                    }).await.unwrap_or(())
+                }
+                Ok(())
+            })));
+        }
+
         Ok((genesis_state, block_height))
     }
 
@@ -155,6 +204,14 @@ impl BurnchainController for MocknetController {
         _ignored_target_height_opt: Option<u64>,
     ) -> Result<(BurnchainTip, u64), BurnchainControllerError> {
         let chain_tip = self.get_chain_tip();
+        if chain_tip.block_snapshot.block_height > 3 && self.control_server.is_some() {
+            info!("Waiting a signal to proceed at burn block height {}", chain_tip.block_snapshot.block_height);
+            loop {
+                if *(self.signaled.lock().unwrap()) { break; }
+                std::thread::sleep(std::time::Duration::from_millis(1000));
+            }
+            info!("Signal received, mining new burn block...");
+        }
 
         // Simulating mining
         let next_block_header = Self::build_next_block_header(&chain_tip.block_snapshot);
@@ -166,7 +223,7 @@ impl BurnchainController for MocknetController {
                 Sha256Sum::from_data(
                     format!("{}::{}", next_block_header.block_height, vtxindex).as_bytes(),
                 )
-                .0,
+                    .0,
             );
             let op = match payload {
                 BlockstackOperationType::LeaderKeyRegister(payload) => {
@@ -295,6 +352,10 @@ impl BurnchainController for MocknetController {
         self.chain_tip = Some(new_state.clone());
 
         let block_height = new_state.block_snapshot.block_height;
+        {
+            let mut signaled = self.signaled.lock().unwrap();
+            *signaled = false;
+        }
         Ok((new_state, block_height))
     }
 

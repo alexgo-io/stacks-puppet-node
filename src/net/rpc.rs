@@ -146,10 +146,14 @@ pub struct ConversationHttp {
     outbound_url: Option<UrlString>,
     peer_addr: SocketAddr,
     keep_alive: bool,
-    total_request_count: u64,     // number of messages taken from the inbox
-    total_reply_count: u64,       // number of messages responsed to
-    last_request_timestamp: u64, // absolute timestamp of the last time we received at least 1 byte in a request
-    last_response_timestamp: u64, // absolute timestamp of the last time we sent at least 1 byte in a response
+    total_request_count: u64,
+    // number of messages taken from the inbox
+    total_reply_count: u64,
+    // number of messages responsed to
+    last_request_timestamp: u64,
+    // absolute timestamp of the last time we received at least 1 byte in a request
+    last_response_timestamp: u64,
+    // absolute timestamp of the last time we sent at least 1 byte in a response
     connection_time: u64,         // when this converation was instantiated
 
     canonical_stacks_tip_height: Option<u64>, // chain tip height of the peer's Stacks blockchain
@@ -210,7 +214,10 @@ impl RPCPeerInfoData {
         genesis_chainstate_hash: &Sha256Sum,
     ) -> RPCPeerInfoData {
         let server_version = version_string(
-            "stacks-node",
+            match option_env!("STACKS_NODE_PUPPET_MODE").unwrap_or("false") {
+                "true" => "stacks-node-puppetnet",
+                _ => "stacks-node",
+            },
             option_env!("STACKS_NODE_VERSION")
                 .or(option_env!("CARGO_PKG_VERSION"))
                 .unwrap_or("0.0.0.0"),
@@ -368,8 +375,8 @@ impl RPCPoxInfoData {
         let next_prepare_phase_in = i64::try_from(next_prepare_phase_start)
             .map_err(|_| net_error::ChainstateError("Burn block height overflowed i64".into()))?
             - i64::try_from(burnchain_tip.block_height).map_err(|_| {
-                net_error::ChainstateError("Burn block height overflowed i64".into())
-            })?;
+            net_error::ChainstateError("Burn block height overflowed i64".into())
+        })?;
 
         let cur_cycle_stacked_ustx =
             chainstate.get_total_ustx_stacked(&sortdb, tip, reward_cycle_id as u128)?;
@@ -451,7 +458,7 @@ impl RPCNeighborsInfo {
             chain_view.burn_block_height,
             false,
         )
-        .map_err(net_error::DBError)?;
+            .map_err(net_error::DBError)?;
 
         let sample: Vec<RPCNeighbor> = neighbor_sample
             .into_iter()
@@ -1382,17 +1389,17 @@ impl ConversationHttp {
             ),
             Ok(Some(Err(e))) => match e {
                 Unchecked(CheckErrors::CostBalanceExceeded(actual_cost, _))
-                    if actual_cost.write_count > 0 =>
-                {
-                    HttpResponseType::CallReadOnlyFunction(
-                        response_metadata,
-                        CallReadOnlyResponse {
-                            okay: false,
-                            result: None,
-                            cause: Some("NotReadOnly".to_string()),
-                        },
-                    )
-                }
+                if actual_cost.write_count > 0 =>
+                    {
+                        HttpResponseType::CallReadOnlyFunction(
+                            response_metadata,
+                            CallReadOnlyResponse {
+                                okay: false,
+                                result: None,
+                                cause: Some("NotReadOnly".to_string()),
+                            },
+                        )
+                    }
                 _ => HttpResponseType::CallReadOnlyFunction(
                     response_metadata,
                     CallReadOnlyResponse {
@@ -1665,7 +1672,7 @@ impl ConversationHttp {
         // present in the unconfirmed state?
         if let Some(ref unconfirmed) = chainstate.unconfirmed_state.as_ref() {
             if let Some((transaction, mblock_hash, seq)) =
-                unconfirmed.get_unconfirmed_transaction(txid)
+            unconfirmed.get_unconfirmed_transaction(txid)
             {
                 let response = HttpResponseType::UnconfirmedTransaction(
                     response_metadata,
@@ -1828,13 +1835,13 @@ impl ConversationHttp {
             HttpResponseMetadata::from_http_request_type(req, Some(canonical_stacks_tip_height));
         let tip = SortitionDB::get_canonical_burn_chain_tip(sortdb.conn())?;
         let stacks_epoch = SortitionDB::get_stacks_epoch(sortdb.conn(), tip.block_height)?
-                .ok_or_else(|| {
-                    warn!(
+            .ok_or_else(|| {
+                warn!(
                         "Failed to get fee rate estimate because could not load Stacks epoch for canonical burn height = {}",
                         tip.block_height
                     );
-                    net_error::ChainstateError("Could not load Stacks epoch for canonical burn height".into())
-                })?;
+                net_error::ChainstateError("Could not load Stacks epoch for canonical burn height".into())
+            })?;
         if let Some((cost_estimator, fee_estimator, metric)) = handler_args.get_estimators_ref() {
             let estimated_cost = match cost_estimator.estimate_cost(tx, &stacks_epoch.epoch_id) {
                 Ok(x) => x,
@@ -2628,14 +2635,14 @@ impl ConversationHttp {
                     network.burnchain_tip.canonical_stacks_tip_height,
                 )? {
                     if let Some((consensus_hash, block_hash)) =
-                        ConversationHttp::handle_load_stacks_chain_tip_hashes(
-                            &mut self.connection.protocol,
-                            &mut reply,
-                            &req,
-                            tip,
-                            chainstate,
-                            network.burnchain_tip.canonical_stacks_tip_height,
-                        )?
+                    ConversationHttp::handle_load_stacks_chain_tip_hashes(
+                        &mut self.connection.protocol,
+                        &mut reply,
+                        &req,
+                        tip,
+                        chainstate,
+                        network.burnchain_tip.canonical_stacks_tip_height,
+                    )?
                     {
                         let accepted = ConversationHttp::handle_post_microblock(
                             &mut self.connection.protocol,
@@ -3495,21 +3502,21 @@ mod test {
         make_request: F,
         check_result: C,
     ) -> ()
-    where
-        F: FnOnce(
-            &mut TestPeer,
-            &mut ConversationHttp,
-            &mut TestPeer,
-            &mut ConversationHttp,
-        ) -> HttpRequestType,
-        C: FnOnce(
-            &HttpRequestType,
-            &HttpResponseType,
-            &mut TestPeer,
-            &mut TestPeer,
-            &ConversationHttp,
-            &ConversationHttp,
-        ) -> bool,
+        where
+            F: FnOnce(
+                &mut TestPeer,
+                &mut ConversationHttp,
+                &mut TestPeer,
+                &mut ConversationHttp,
+            ) -> HttpRequestType,
+            C: FnOnce(
+                &HttpRequestType,
+                &HttpResponseType,
+                &mut TestPeer,
+                &mut TestPeer,
+                &ConversationHttp,
+                &ConversationHttp,
+            ) -> bool,
     {
         let mut peer_1_config = TestPeerConfig::new(test_name, peer_1_p2p, peer_1_http);
         let mut peer_2_config = TestPeerConfig::new(test_name, peer_2_p2p, peer_2_http);
@@ -3518,13 +3525,13 @@ mod test {
         let privk1 = StacksPrivateKey::from_hex(
             "9f1f85a512a96a244e4c0d762788500687feb97481639572e3bffbd6860e6ab001",
         )
-        .unwrap();
+            .unwrap();
 
         // STVN97YYA10MY5F6KQJHKNYJNM24C4A1AT39WRW
         let privk2 = StacksPrivateKey::from_hex(
             "94c319327cc5cd04da7147d32d836eb2e4c44f4db39aa5ede7314a761183d0c701",
         )
-        .unwrap();
+            .unwrap();
         let microblock_privkey = StacksPrivateKey::new();
         let microblock_pubkeyhash =
             Hash160::from_node_public_key(&StacksPublicKey::from_private(&microblock_privkey));
@@ -3535,14 +3542,14 @@ mod test {
             1,
             &vec![StacksPublicKey::from_private(&privk1)],
         )
-        .unwrap();
+            .unwrap();
         let addr2 = StacksAddress::from_public_keys(
             C32_ADDRESS_VERSION_TESTNET_SINGLESIG,
             &AddressHashMode::SerializeP2PKH,
             1,
             &vec![StacksPublicKey::from_private(&privk2)],
         )
-        .unwrap();
+            .unwrap();
 
         peer_1_config.initial_balances = vec![
             (addr1.to_account_principal(), 1000000000),
@@ -3623,7 +3630,7 @@ mod test {
                 &format!("hello-world-unconfirmed"),
                 &unconfirmed_contract.to_string(),
             )
-            .unwrap(),
+                .unwrap(),
         );
 
         tx_unconfirmed_contract.chain_id = 0x80000000;
@@ -3661,15 +3668,15 @@ mod test {
                             &tip.sortition_id,
                             &block.block_hash(),
                         )
-                        .unwrap()
-                        .unwrap(); // succeeds because we don't fork
+                            .unwrap()
+                            .unwrap(); // succeeds because we don't fork
                         StacksChainState::get_anchored_block_header_info(
                             chainstate.db(),
                             &snapshot.consensus_hash,
                             &snapshot.winning_stacks_block_hash,
                         )
-                        .unwrap()
-                        .unwrap()
+                            .unwrap()
+                            .unwrap()
                     }
                 };
 
@@ -3679,7 +3686,7 @@ mod test {
                     tip.total_burn,
                     microblock_pubkeyhash,
                 )
-                .unwrap();
+                    .unwrap();
                 let (anchored_block, anchored_block_size, anchored_block_cost) =
                     StacksBlockBuilder::make_anchored_block_from_txs(
                         block_builder,
@@ -3687,7 +3694,7 @@ mod test {
                         &sortdb.index_conn(),
                         vec![tx_coinbase_signed.clone(), tx_contract_signed.clone()],
                     )
-                    .unwrap();
+                        .unwrap();
 
                 anchor_size = anchored_block_size;
                 anchor_cost = anchored_block_cost;
@@ -3717,7 +3724,7 @@ mod test {
                         &sort_iconn,
                         BlockBuilderSettings::max_value(),
                     )
-                    .unwrap();
+                        .unwrap();
                     let microblock = microblock_builder
                         .mine_next_microblock_from_txs(
                             vec![
@@ -3783,7 +3790,7 @@ mod test {
                 1,
                 &vec![StacksPublicKey::from_private(&StacksPrivateKey::new())],
             )
-            .unwrap();
+                .unwrap();
             let mut tx = StacksTransaction {
                 version: TransactionVersion::Testnet,
                 chain_id: 0x80000000,
@@ -3824,7 +3831,7 @@ mod test {
                 sponsor_nonce,
                 None,
             )
-            .unwrap();
+                .unwrap();
         }
         mempool_tx.commit().unwrap();
         peer_2.mempool.replace(mempool);
@@ -4000,7 +4007,7 @@ mod test {
             &mut peer_1,
             &mut peer_2,
             &convo_1,
-            &convo_2
+            &convo_2,
         ));
     }
 
@@ -4107,7 +4114,7 @@ mod test {
                     &stacks_block_id,
                     &peer_client.config.burnchain,
                 )
-                .unwrap();
+                    .unwrap();
                 *pox_server_info.borrow_mut() = Some(pox_info);
                 convo_client.new_getpoxinfo(TipRequest::UseLatestAnchoredTip)
             },
@@ -4164,7 +4171,7 @@ mod test {
                     &stacks_block_id,
                     &peer_client.config.burnchain,
                 )
-                .unwrap();
+                    .unwrap();
                 *pox_server_info.borrow_mut() = Some(pox_info);
                 convo_client.new_getpoxinfo(TipRequest::UseLatestUnconfirmedTip)
             },
@@ -4469,7 +4476,7 @@ mod test {
                 let privk = StacksPrivateKey::from_hex(
                     "eb05c83546fdd2c79f10f5ad5434a90dd28f7e3acb7c092157aa1bc3656b012c01",
                 )
-                .unwrap();
+                    .unwrap();
 
                 let parent_block = make_codec_test_block(25);
                 let parent_consensus_hash = ConsensusHash([0x02; 20]);
@@ -4587,7 +4594,7 @@ mod test {
                 let privk = StacksPrivateKey::from_hex(
                     "eb05c83546fdd2c79f10f5ad5434a90dd28f7e3acb7c092157aa1bc3656b012c01",
                 )
-                .unwrap();
+                    .unwrap();
 
                 let parent_block = make_codec_test_block(25);
                 let parent_consensus_hash = ConsensusHash([0x02; 20]);
@@ -4701,7 +4708,7 @@ mod test {
                 let privk = StacksPrivateKey::from_hex(
                     "eb05c83546fdd2c79f10f5ad5434a90dd28f7e3acb7c092157aa1bc3656b012c01",
                 )
-                .unwrap();
+                    .unwrap();
 
                 let consensus_hash = ConsensusHash([0x02; 20]);
                 let anchored_block_hash = BlockHeaderHash([0x03; 32]);
@@ -4770,7 +4777,7 @@ mod test {
                 let privk = StacksPrivateKey::from_hex(
                     "eb05c83546fdd2c79f10f5ad5434a90dd28f7e3acb7c092157aa1bc3656b012c01",
                 )
-                .unwrap();
+                    .unwrap();
 
                 let sortdb = peer_server.sortdb.take().unwrap();
                 Relayer::setup_unconfirmed_state(peer_server.chainstate(), &sortdb).unwrap();
@@ -4812,13 +4819,13 @@ mod test {
                             unconfirmed_resp.status,
                             UnconfirmedTransactionStatus::Microblock {
                                 block_hash: (*last_mblock.borrow()).clone(),
-                                seq: 0
+                                seq: 0,
                             }
                         );
                         let tx = StacksTransaction::consensus_deserialize(
                             &mut &hex_bytes(&unconfirmed_resp.tx).unwrap()[..],
                         )
-                        .unwrap();
+                            .unwrap();
                         assert_eq!(tx.txid(), *last_txid.borrow());
                         true
                     }
@@ -4976,7 +4983,7 @@ mod test {
                 let privk = StacksPrivateKey::from_hex(
                     "eb05c83546fdd2c79f10f5ad5434a90dd28f7e3acb7c092157aa1bc3656b012c01",
                 )
-                .unwrap();
+                    .unwrap();
 
                 let consensus_hash = ConsensusHash([0x02; 20]);
                 let anchored_block_hash = BlockHeaderHash([0x03; 32]);
@@ -5603,7 +5610,7 @@ mod test {
                                 TupleData::from_data(vec![("units".into(), Value::Int(123))])
                                     .unwrap()
                             ))
-                            .unwrap()
+                                .unwrap()
                         );
                         true
                     }
@@ -5672,7 +5679,7 @@ mod test {
                                 TupleData::from_data(vec![("units".into(), Value::Int(1))])
                                     .unwrap()
                             ))
-                            .unwrap()
+                                .unwrap()
                         );
                         true
                     }
@@ -5731,7 +5738,7 @@ mod test {
                                 TupleData::from_data(vec![("units".into(), Value::Int(1))])
                                     .unwrap()
                             ))
-                            .unwrap()
+                                .unwrap()
                         );
                         true
                     }
