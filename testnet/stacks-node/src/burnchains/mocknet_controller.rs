@@ -29,6 +29,7 @@ use super::{BurnchainController, BurnchainTip, Error as BurnchainControllerError
 use stacks::vm::costs::ExecutionCost;
 
 struct PuppetControl {
+    pub kicked: bool,
     pub next_block_time: SystemTime,
     pub block_interval: Duration,
 }
@@ -60,6 +61,7 @@ impl MocknetController {
             queued_operations: VecDeque::new(),
             chain_tip: None,
             puppet_control: Arc::new(Mutex::new(PuppetControl {
+                kicked: false,
                 next_block_time: SystemTime::now(),
                 block_interval: Duration::from_secs(600),
             })),
@@ -157,12 +159,12 @@ impl BurnchainController for MocknetController {
         self.chain_tip = Some(genesis_state.clone());
         let block_height = genesis_state.block_snapshot.block_height;
 
-        if option_env!("STACKS_NODE_PUPPET_MODE").unwrap_or("false") == "true" {
+        if std::env::var("STACKS_NODE_PUPPET_MODE").unwrap_or_default() == "true" {
             info!("ENV STACKS_NODE_PUPPET_MODE is set to true, starting burnchain signal server..");
             let puppet_control = Arc::clone(&self.puppet_control);
             self.control_server = Some(std::thread::spawn(move || block_on(async {
                 let listener = async_std::net::TcpListener::bind(
-                    option_env!("STACKS_NODE_PUPPET_BIND").unwrap_or("0.0.0.0:20445")).await?;
+                    std::env::var("STACKS_NODE_PUPPET_BIND").unwrap_or(String::from("0.0.0.0:20445"))).await?;
                 let addr = format!("http://{}", listener.local_addr()?);
                 info!("burnchain signal server listening on {}", addr);
 
@@ -179,8 +181,7 @@ impl BurnchainController for MocknetController {
                             (Method::Get, "/ping") => Ok(Response::new(StatusCode::Ok)),
                             (Method::Post, "/kick") => {
                                 let mut puppet_control = puppet_control.lock().unwrap();
-                                puppet_control.next_block_time = SystemTime::now();
-                                io::stdout().flush().unwrap();
+                                puppet_control.kicked = true;
                                 Ok(Response::new(StatusCode::Ok))
                             }
                             (Method::Put, "/duration") => {
@@ -234,9 +235,9 @@ impl BurnchainController for MocknetController {
             info!("Waiting a signal to proceed at burn block height {}", chain_tip.block_snapshot.block_height);
             loop {
                 let puppet_control = self.puppet_control.lock().unwrap();
-                if puppet_control.next_block_time.le(&SystemTime::now()) { break; }
+                if puppet_control.kicked || puppet_control.next_block_time.le(&SystemTime::now()) { break; }
                 drop(puppet_control);
-                std::thread::sleep(Duration::from_millis(50));
+                std::thread::sleep(Duration::from_millis(100));
             }
             info!("Signal received, mining new burn block...");
         }
@@ -382,7 +383,8 @@ impl BurnchainController for MocknetController {
         let block_height = new_state.block_snapshot.block_height;
         {
             let mut puppet_control = self.puppet_control.lock().unwrap();
-            puppet_control.next_block_time = SystemTime::now().add(puppet_control.block_interval)
+            puppet_control.next_block_time = SystemTime::now().add(puppet_control.block_interval);
+            puppet_control.kicked = false;
         }
         Ok((new_state, block_height))
     }

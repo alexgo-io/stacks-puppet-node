@@ -214,7 +214,7 @@ impl RPCPeerInfoData {
         genesis_chainstate_hash: &Sha256Sum,
     ) -> RPCPeerInfoData {
         let server_version = version_string(
-            match option_env!("STACKS_NODE_PUPPET_MODE").unwrap_or("false") {
+            match &*std::env::var("STACKS_NODE_PUPPET_MODE").unwrap_or_default() {
                 "true" => "stacks-node-puppetnet",
                 _ => "stacks-node",
             },

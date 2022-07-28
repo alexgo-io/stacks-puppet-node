@@ -160,7 +160,7 @@ fn main() {
 
     if conf.burnchain.mode == "helium" || conf.burnchain.mode == "mocknet" {
         let mut conf = conf;
-        if option_env!("STACKS_NODE_PUPPET_MODE").unwrap_or("false") == "true" {
+        if env::var("STACKS_NODE_PUPPET_MODE").unwrap_or_default() == "true" {
             conf.burnchain.commit_anchor_block_within = 0;
         }
         let mut run_loop = helium::RunLoop::new(conf);
@@ -182,7 +182,7 @@ fn main() {
 
 fn version() -> String {
     stacks::version_string(
-        match option_env!("STACKS_NODE_PUPPET_MODE").unwrap_or("false") {
+        match &*env::var("STACKS_NODE_PUPPET_MODE").unwrap_or_default() {
             "true" => "stacks-node-puppetnet",
             _ => "stacks-node",
         },
