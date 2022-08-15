@@ -1134,6 +1134,8 @@ impl StandardPrincipalData {
 impl fmt::Display for StandardPrincipalData {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let c32_str = self.to_address();
+        // f.write_str(c32_str.as_str()).unwrap();
+        // Ok(())
         write!(f, "{}", c32_str)
     }
 }

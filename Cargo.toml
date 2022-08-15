@@ -14,7 +14,7 @@ resolver = "2"
 edition = "2021"
 
 [profile.release]
-debug = true
+debug = false
 
 [lib]
 name = "blockstack_lib"

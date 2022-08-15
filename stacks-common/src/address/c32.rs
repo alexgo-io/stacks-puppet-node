@@ -14,11 +14,16 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+use std::borrow::{Borrow, BorrowMut};
+use std::collections::HashMap;
 use super::Error;
 
 use sha2::Digest;
 use sha2::Sha256;
 use std::convert::TryFrom;
+use std::ops::Add;
+use std::sync::{Arc, Mutex, MutexGuard, Once};
+use libc::wchar_t;
 
 const C32_CHARACTERS: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
@@ -289,7 +294,19 @@ fn c32_decode_ascii(input_str: &str) -> Result<Vec<u8>, Error> {
 }
 
 fn double_sha256_checksum(data: &[u8]) -> Vec<u8> {
-    let tmp = Sha256::digest(Sha256::digest(data));
+    use crypto::digest::Digest;
+    use crypto::sha2::Sha256;
+    let mut tmp = vec![0u8; 32];
+    {
+        let mut d1 = Sha256::new();
+        d1.input(data);
+        d1.result(&mut tmp);
+    }
+    {
+        let mut d2 = Sha256::new();
+        d2.input(&tmp);
+        d2.result(&mut tmp);
+    }
     tmp[0..4].to_vec()
 }
 
@@ -363,13 +380,40 @@ pub fn c32_address_decode(c32_address_str: &str) -> Result<(u8, Vec<u8>), Error>
     }
 }
 
+static mut c32_address_cache: Option<Mutex<HashMap<String, String>>> = None;
+static INIT: Once = Once::new();
+
 pub fn c32_address(version: u8, data: &[u8]) -> Result<String, Error> {
-    let c32_string = c32_check_encode(version, data)?;
-    Ok(format!("S{}", c32_string))
+    INIT.call_once(|| {
+        unsafe {
+            *c32_address_cache.borrow_mut() = Some(Mutex::new(HashMap::new()))
+        }
+    });
+    let mut key = String::new();
+    key.push(version as char);
+    for &u in data {
+        key.push(u as char)
+    }
+    let mut cache = unsafe {
+        c32_address_cache.as_ref().unwrap().lock().expect("should be able to lock global cache")
+    };
+    let r = cache.get(&key[..]);
+    match r {
+        Some(s) => {
+            Ok(s.clone())
+        }
+        None => {
+            let c32_string = "S".to_string().add(c32_check_encode(version, data)?.as_str());
+            cache.insert(key, c32_string.clone());
+            Ok(c32_string)
+        }
+    }
 }
 
 #[cfg(test)]
 mod test {
+    use std::time::SystemTime;
+    use libc::printf;
     use super::super::c32_old::{
         c32_address as c32_address_old, c32_address_decode as c32_address_decode_old,
     };
@@ -476,6 +520,21 @@ mod test {
                 assert_eq!(decoded_bytes, b);
             }
         }
+    }
+
+    #[test]
+    fn test_encode() {
+        let start = SystemTime::now();
+        for r in 0..10000 {
+            // c32_check_encode(1, &[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]).unwrap();
+            Sha256::digest(&[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
+            // use crypto::digest::Digest;
+            // let mut digest = crypto::sha2::Sha256::new();
+            // let mut out: Vec<u8> = vec![0; 32];
+            // digest.input(&[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
+            // digest.result(&mut out);
+        }
+        println!("Costs: {}", start.elapsed().unwrap().as_millis())
     }
 
     #[test]
