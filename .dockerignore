@@ -1,5 +1,6 @@
 Dockerfile*
 target
+!target/release/stacks-node
 integration_tests/blockstack-consensus-data/
 integration_tests/test-out/
 api/data

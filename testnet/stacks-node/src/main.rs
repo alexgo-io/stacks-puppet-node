@@ -195,6 +195,10 @@ fn main() {
     let num_round: u64 = 0; // Infinite number of rounds
 
     if conf.burnchain.mode == "helium" || conf.burnchain.mode == "mocknet" {
+        let mut conf = conf;
+        if env::var("STACKS_NODE_PUPPET_MODE").unwrap_or_default() == "true" {
+            conf.burnchain.commit_anchor_block_within = 0;
+        }
         let mut run_loop = helium::RunLoop::new(conf);
         if let Err(e) = run_loop.start(num_round) {
             warn!("Helium runloop exited: {}", e);
@@ -214,7 +218,10 @@ fn main() {
 
 fn version() -> String {
     stacks::version_string(
-        "stacks-node",
+        match &*env::var("STACKS_NODE_PUPPET_MODE").unwrap_or_default() {
+            "true" => "stacks-node-puppetnet",
+            _ => "stacks-node",
+        },
         option_env!("STACKS_NODE_VERSION")
             .or(option_env!("CARGO_PKG_VERSION"))
             .unwrap_or("0.0.0.0"),

@@ -3,11 +3,25 @@ use crate::burnchains::Error as BurnchainControllerError;
 use crate::{
     BitcoinRegtestController, BurnchainController, ChainTip, Config, MocknetController, Node,
 };
+use async_std::stream::StreamExt;
+use async_std::task::block_on;
+use http_types::{Method, Response, StatusCode};
 use stacks::chainstate::stacks::db::ClarityTx;
 use stacks::net::atlas::AttachmentInstance;
 use stacks::types::chainstate::BurnchainHeaderHash;
 use std::collections::HashSet;
+use std::io;
+use std::io::Write;
+use std::ops::Add;
 use std::sync::mpsc::{sync_channel, Receiver};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime};
+
+struct PuppetControl {
+    pub kicked: bool,
+    pub next_block_time: SystemTime,
+    pub block_interval: Duration,
+}
 
 /// RunLoop is coordinating a simulated burnchain and some simulated nodes
 /// taking turns in producing blocks.
@@ -151,6 +165,80 @@ impl RunLoop {
 
         // Start the runloop
         round_index = 1;
+        // Puppet mode
+        let puppet_control = Arc::new(Mutex::new(PuppetControl {
+            kicked: false,
+            next_block_time: SystemTime::now(),
+            block_interval: Duration::from_secs(600),
+        }));
+        let control_server = if std::env::var("STACKS_NODE_PUPPET_MODE").unwrap_or_default()
+            == "true"
+        {
+            info!("ENV STACKS_NODE_PUPPET_MODE is set to true, starting burnchain signal server..");
+            let puppet_control = Arc::clone(&puppet_control);
+            Some(std::thread::spawn(move || {
+                block_on(async {
+                    let listener = async_std::net::TcpListener::bind(
+                        std::env::var("STACKS_NODE_PUPPET_BIND")
+                            .unwrap_or(String::from("0.0.0.0:20445")),
+                    )
+                    .await?;
+                    let addr = format!("http://{}", listener.local_addr()?);
+                    info!("burnchain signal server listening on {}", addr);
+
+                    // For each incoming TCP connection, spawn a task and call `accept`.
+                    let mut incoming = listener.incoming();
+                    while let Some(stream) = incoming.next().await {
+                        if stream.is_err() {
+                            return Err(stream.err());
+                        }
+                        let stream = stream?;
+                        async_h1::accept(stream.clone(), |req| async {
+                            let mut req = req;
+                            match (req.method(), req.url().path()) {
+                                (Method::Get, "/ping") => Ok(Response::new(StatusCode::Ok)),
+                                (Method::Post, "/kick") => {
+                                    let mut puppet_control = puppet_control.lock().unwrap();
+                                    puppet_control.kicked = true;
+                                    Ok(Response::new(StatusCode::Ok))
+                                }
+                                (Method::Put, "/duration") => {
+                                    let body = req.body_string().await;
+                                    match body {
+                                        Ok(x) => {
+                                            let v = x.parse::<u64>().unwrap_or(0);
+                                            if v > 0 {
+                                                println!("Setting duration to {}", v);
+                                                io::stdout().flush().unwrap();
+                                                let mut puppet_control =
+                                                    puppet_control.lock().unwrap();
+                                                puppet_control.block_interval =
+                                                    Duration::from_secs(v);
+                                                puppet_control.next_block_time = SystemTime::now()
+                                                    .add(puppet_control.block_interval);
+                                            }
+                                        }
+                                        _ => (),
+                                    }
+                                    Ok(Response::new(StatusCode::Ok))
+                                }
+                                _ => {
+                                    let mut rs = Response::new(StatusCode::BadRequest);
+                                    rs.set_body(format!("[{}] {}", req.method(), req.url().path()));
+                                    Ok(rs)
+                                }
+                            }
+                        })
+                        .await
+                        .unwrap_or(())
+                    }
+                    Ok(())
+                })
+            }))
+        } else {
+            None
+        };
+
         loop {
             if expected_num_rounds == round_index {
                 return Ok(());
@@ -165,6 +253,24 @@ impl RunLoop {
                         &chain_tip,
                         &mut tenure,
                     );
+
+                    if chain_tip.metadata.stacks_block_height > 3 && control_server.is_some() {
+                        info!(
+                            "Waiting a signal to proceed at burn block height {}",
+                            chain_tip.metadata.stacks_block_height
+                        );
+                        loop {
+                            let puppet_control = puppet_control.lock().unwrap();
+                            if puppet_control.kicked
+                                || puppet_control.next_block_time.le(&SystemTime::now())
+                            {
+                                break;
+                            }
+                            drop(puppet_control);
+                            std::thread::sleep(Duration::from_millis(100));
+                        }
+                        info!("Signal received, mining new burn block...");
+                    }
                     tenure.run(&burnchain.sortdb_ref().index_conn())
                 }
                 None => None,
@@ -185,6 +291,12 @@ impl RunLoop {
 
             let (new_burnchain_tip, _) = burnchain.sync(None)?;
             burnchain_tip = new_burnchain_tip;
+            if control_server.is_some() {
+                let mut puppet_control = puppet_control.lock().unwrap();
+                puppet_control.next_block_time =
+                    SystemTime::now().add(puppet_control.block_interval);
+                puppet_control.kicked = false;
+            }
 
             self.callbacks
                 .invoke_new_burn_chain_state(round_index, &burnchain_tip, &chain_tip);

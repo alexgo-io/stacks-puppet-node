@@ -211,7 +211,10 @@ impl RPCPeerInfoData {
         genesis_chainstate_hash: &Sha256Sum,
     ) -> RPCPeerInfoData {
         let server_version = version_string(
-            "stacks-node",
+            match &*std::env::var("STACKS_NODE_PUPPET_MODE").unwrap_or_default() {
+                "true" => "stacks-node-puppetnet",
+                _ => "stacks-node",
+            },
             option_env!("STACKS_NODE_VERSION")
                 .or(option_env!("CARGO_PKG_VERSION"))
                 .unwrap_or("0.0.0.0"),
@@ -1829,13 +1832,13 @@ impl ConversationHttp {
             HttpResponseMetadata::from_http_request_type(req, Some(canonical_stacks_tip_height));
         let tip = SortitionDB::get_canonical_burn_chain_tip(sortdb.conn())?;
         let stacks_epoch = SortitionDB::get_stacks_epoch(sortdb.conn(), tip.block_height)?
-                .ok_or_else(|| {
-                    warn!(
+            .ok_or_else(|| {
+                warn!(
                         "Failed to get fee rate estimate because could not load Stacks epoch for canonical burn height = {}",
                         tip.block_height
                     );
-                    net_error::ChainstateError("Could not load Stacks epoch for canonical burn height".into())
-                })?;
+                net_error::ChainstateError("Could not load Stacks epoch for canonical burn height".into())
+            })?;
         if let Some((cost_estimator, fee_estimator, metric)) = handler_args.get_estimators_ref() {
             let estimated_cost = match cost_estimator.estimate_cost(tx, &stacks_epoch.epoch_id) {
                 Ok(x) => x,
@@ -4061,7 +4064,7 @@ mod test {
             &mut peer_1,
             &mut peer_2,
             &convo_1,
-            &convo_2
+            &convo_2,
         ));
     }
 
@@ -4873,7 +4876,7 @@ mod test {
                             unconfirmed_resp.status,
                             UnconfirmedTransactionStatus::Microblock {
                                 block_hash: (*last_mblock.borrow()).clone(),
-                                seq: 0
+                                seq: 0,
                             }
                         );
                         let tx = StacksTransaction::consensus_deserialize(
