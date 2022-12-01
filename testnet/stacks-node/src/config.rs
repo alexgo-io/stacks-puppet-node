@@ -670,6 +670,10 @@ impl Config {
                     // chainstate fault_injection activation for hide_blocks.
                     // you can't set this in the config file.
                     fault_injection_hide_blocks: false,
+                    enable_puppet_mode: node
+                        .enable_puppet_mode
+                        .unwrap_or(default_node_config.enable_puppet_mode),
+                    puppet_bind: node.puppet_bind.unwrap_or(default_node_config.puppet_bind),
                 };
                 (node_config, node.bootstrap_node, node.deny_nodes)
             }
@@ -1455,6 +1459,8 @@ pub struct NodeConfig {
     // fault injection for hiding blocks.
     // not part of the config file.
     pub fault_injection_hide_blocks: bool,
+    pub enable_puppet_mode: bool,
+    pub puppet_bind: String,
 }
 
 #[derive(Clone, Debug)]
@@ -1698,6 +1704,7 @@ impl NodeConfig {
 
         let rpc_port = 20443;
         let p2p_port = 20444;
+        let puppet_port = 20445;
 
         let mut local_peer_seed = [0u8; 32];
         rng.fill_bytes(&mut local_peer_seed);
@@ -1732,6 +1739,8 @@ impl NodeConfig {
             always_use_affirmation_maps: true,
             require_affirmed_anchor_blocks: true,
             fault_injection_hide_blocks: false,
+            enable_puppet_mode: false,
+            puppet_bind: format!("0.0.0.0:{}", puppet_port),
         }
     }
 
@@ -1933,6 +1942,8 @@ pub struct NodeConfigFile {
     pub use_test_genesis_chainstate: Option<bool>,
     pub always_use_affirmation_maps: Option<bool>,
     pub require_affirmed_anchor_blocks: Option<bool>,
+    pub enable_puppet_mode: Option<bool>,
+    pub puppet_bind: Option<String>,
 }
 
 #[derive(Clone, Deserialize, Debug)]
