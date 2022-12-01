@@ -1817,6 +1817,8 @@ pub struct NodeConfig {
     pub chain_liveness_poll_time_secs: u64,
     /// stacker DBs we replicate
     pub stacker_dbs: Vec<QualifiedContractIdentifier>,
+    pub enable_puppet_mode: bool,
+    pub puppet_bind: String,
 }
 
 #[derive(Clone, Debug)]
@@ -2060,6 +2062,7 @@ impl Default for NodeConfig {
 
         let rpc_port = 20443;
         let p2p_port = 20444;
+        let puppet_port = 20445;
 
         let mut local_peer_seed = [0u8; 32];
         rng.fill_bytes(&mut local_peer_seed);
@@ -2098,6 +2101,8 @@ impl Default for NodeConfig {
             fault_injection_hide_blocks: false,
             chain_liveness_poll_time_secs: 300,
             stacker_dbs: vec![],
+            enable_puppet_mode: false,
+            puppet_bind: format!("0.0.0.0:{}", puppet_port),
         }
     }
 }
@@ -2554,6 +2559,8 @@ pub struct NodeConfigFile {
     pub chain_liveness_poll_time_secs: Option<u64>,
     /// Stacker DBs we replicate
     pub stacker_dbs: Option<Vec<String>>,
+    pub enable_puppet_mode: Option<bool>,
+    pub puppet_bind: Option<String>,
 }
 
 impl NodeConfigFile {
@@ -2632,6 +2639,12 @@ impl NodeConfigFile {
                 .iter()
                 .filter_map(|contract_id| QualifiedContractIdentifier::parse(contract_id).ok())
                 .collect(),
+            enable_puppet_mode: self
+                .enable_puppet_mode
+                .unwrap_or(default_node_config.enable_puppet_mode),
+            puppet_bind: self
+                .puppet_bind
+                .unwrap_or(default_node_config.puppet_bind.clone()),
         };
         Ok(node_config)
     }

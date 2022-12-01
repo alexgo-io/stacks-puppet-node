@@ -2,6 +2,7 @@ pub mod boot_nakamoto;
 pub mod helium;
 pub mod nakamoto;
 pub mod neon;
+pub mod puppet;
 
 use clarity::vm::costs::ExecutionCost;
 use clarity::vm::database::BurnStateDB;

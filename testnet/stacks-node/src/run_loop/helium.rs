@@ -3,6 +3,7 @@ use stacks_common::types::chainstate::BurnchainHeaderHash;
 
 use super::RunLoopCallbacks;
 use crate::burnchains::Error as BurnchainControllerError;
+use crate::run_loop::puppet::PuppetController;
 use crate::{
     BitcoinRegtestController, BurnchainController, ChainTip, Config, MocknetController, Node,
 };
@@ -144,11 +145,24 @@ impl RunLoop {
             leader_tenure = self.node.initiate_new_tenure();
         }
 
+        // Puppet mode
+        let puppet_controller = if self.config.node.enable_puppet_mode {
+            let mut c = PuppetController::new(&self.config.node.puppet_bind);
+            c.start();
+            Some(c)
+        } else {
+            None
+        };
+
         // Start the runloop
         round_index = 1;
         loop {
             if expected_num_rounds == round_index {
                 return Ok(());
+            }
+            match &puppet_controller {
+                Some(c) => c.block_on(&chain_tip),
+                _ => (),
             }
 
             // Run the last initialized tenure
